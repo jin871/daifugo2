@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>大富豪 (特殊ルール版)</title>
+    <title>大富豪 (CPU自動参加版)</title>
     <style>
         body { font-family: sans-serif; background-color: #0a6332; color: white; text-align: center; padding: 1em; }
         #game-setup, #game-info, #table, #player-area { background-color: #0c7c3f; border-radius: 10px; padding: 15px; margin: 10px auto; max-width: 800px; }
@@ -22,19 +22,16 @@
         #player-actions { margin-top: 15px; }
         #game-result { font-size: 1.5em; font-weight: bold; margin-top: 20px; }
         #game-container { display: none; }
+        #start-game-area { margin-top: 15px; }
     </style>
 </head>
 <body>
-    <h1>大富豪 (特殊ルール版)</h1>
+    <h1>大富豪 (CPU自動参加版)</h1>
 
     <div id="game-setup">
         <h2>ゲームに参加</h2>
-        <div>
-            <input type="text" id="player-name-input" placeholder="あなたの名前を入力">
-        </div>
-        <div>
-            <button id="create-game-btn">新しいゲームを作成</button>
-        </div>
+        <div><input type="text" id="player-name-input" placeholder="あなたの名前を入力"></div>
+        <div><button id="create-game-btn">新しいゲームを作成</button></div>
         <hr>
         <div>
             <input type="text" id="game-id-input" placeholder="6桁のゲームIDを入力して参加">
@@ -47,6 +44,9 @@
             <p id="message">参加者を待っています...</p>
             <p>現在のターン: <span id="current-player"></span> | 革命中: <span id="revolution-status" style="font-weight: bold; color: #ffc107;">いいえ</span></p>
             <p>ゲームID: <span id="current-game-id" style="font-weight: bold; font-size: 1.2em; color: #ffc107;"></span></p>
+            <div id="start-game-area" style="display: none;">
+                <button id="start-game-btn">CPUを追加してゲーム開始</button>
+            </div>
         </div>
 
         <div id="table">
@@ -80,14 +80,13 @@
             appId: "1:435852264433:web:0ef957830b634b9eb13a50",
             measurementId: "G-8GN7P9PFX7"
         };
-
         const app = initializeApp(firebaseConfig);
         const database = getDatabase(app);
 
+        // ... (定数、カードクラスなどの定義は前回と同じ) ...
         const SUITS = ['♠', '♥', '♦', '♣'];
         const RANKS = ['3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A', '2'];
         const RANK_VALUES = { '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13, 'A': 14, '2': 15, 'Joker': 99 };
-
         const gameSetupDiv = document.getElementById('game-setup');
         const gameContainerDiv = document.getElementById('game-container');
         const playerNameInput = document.getElementById('player-name-input');
@@ -104,36 +103,24 @@
         const playButton = document.getElementById('play-button');
         const passButton = document.getElementById('pass-button');
         const gameResultElement = document.getElementById('game-result');
-        
+        const startGameArea = document.getElementById('start-game-area');
+        const startGameBtn = document.getElementById('start-game-btn');
         let currentGameId = null, localPlayerId = null, gameRef = null, gameState = {};
         class Card { constructor(suit, rank) { this.suit = suit; this.rank = rank; this.value = RANK_VALUES[rank]; this.id = suit ? `${suit}-${rank}` : 'Joker'; } get displayName() { return this.suit ? `${this.suit}${this.rank}` : 'Joker'; } }
-
         function generateRoomId() { return Math.floor(100000 + Math.random() * 900000).toString(); }
-
-        createGameBtn.addEventListener('click', async () => {
+        
+        createGameBtn.addEventListener('click', async () => { /* ...前回のコードと同じ... */
             const playerName = playerNameInput.value.trim();
             if (!playerName) { alert('名前を入力してください。'); return; }
             localPlayerId = `player_${Date.now()}`;
             let newGameId;
             let gameExists = true;
-            while (gameExists) {
-                newGameId = generateRoomId();
-                const gameRefToCheck = ref(database, `games/${newGameId}`);
-                const snapshot = await get(gameRefToCheck);
-                if (!snapshot.exists()) { gameExists = false; }
-            }
+            while (gameExists) { newGameId = generateRoomId(); const gameRefToCheck = ref(database, `games/${newGameId}`); const snapshot = await get(gameRefToCheck); if (!snapshot.exists()) { gameExists = false; } }
             currentGameId = newGameId;
             gameRef = ref(database, `games/${currentGameId}`);
             const initialGameState = {
-                gameId: currentGameId,
-                players: { [localPlayerId]: { id: localPlayerId, name: playerName, hand: [], hasPassed: false, isHost: true } },
-                status: 'waiting',
-                currentPlayerIndex: 0,
-                table: { cards: [], isSequence: false },
-                passCount: 0,
-                ranks: [],
-                isRevolution: false, // ★特殊ルール追加: 革命状態
-                createdAt: serverTimestamp()
+                gameId: currentGameId, players: { [localPlayerId]: { id: localPlayerId, name: playerName, hand: [], hasPassed: false, isHost: true } },
+                status: 'waiting', currentPlayerIndex: 0, table: { cards: [], isSequence: false }, passCount: 0, ranks: [], isRevolution: false, createdAt: serverTimestamp()
             };
             await set(gameRef, initialGameState);
             setupGameListener();
@@ -148,47 +135,90 @@
             if (snapshot.exists()) {
                 const gameData = snapshot.val();
                 if (Object.keys(gameData.players || {}).length >= 4) { alert('このゲームは満員です。'); return; }
-                currentGameId = gameId;
-                gameRef = existingGameRef;
-                localPlayerId = `player_${Date.now()}`;
+                if (gameData.status !== 'waiting') { alert('このゲームは既に開始されています。'); return; }
+                currentGameId = gameId; gameRef = existingGameRef; localPlayerId = `player_${Date.now()}`;
                 const playerRef = ref(database, `games/${currentGameId}/players/${localPlayerId}`);
                 await set(playerRef, { id: localPlayerId, name: playerName, hand: [], hasPassed: false });
                 setupGameListener();
             } else { alert('指定されたゲームIDが見つかりません。'); }
         });
+
+        // ★CPU追加機能: ゲーム開始ボタンの処理
+        startGameBtn.addEventListener('click', async () => {
+            let currentPlayers = gameState.players || {};
+            const playerCount = Object.keys(currentPlayers).length;
+            const neededCpus = 4 - playerCount;
+
+            if (neededCpus > 0) {
+                for (let i = 1; i <= neededCpus; i++) {
+                    const cpuId = `cpu_${i}`;
+                    currentPlayers[cpuId] = {
+                        id: cpuId,
+                        name: `CPU ${i}`,
+                        hand: [],
+                        hasPassed: false,
+                        isCPU: true // CPUフラグ
+                    };
+                }
+            }
+            
+            await set(ref(database, `games/${currentGameId}/players`), currentPlayers);
+            // startGameはonValueのリスナーがstatus変更を検知して呼び出すので、ここではstatusだけ変更
+             startGame(Object.keys(currentPlayers));
+        });
+
         
         function setupGameListener() {
             gameSetupDiv.style.display = 'none';
             gameContainerDiv.style.display = 'block';
             currentGameIdElement.textContent = currentGameId;
+            
             const playerRef = ref(database, `games/${currentGameId}/players/${localPlayerId}`);
             onDisconnect(playerRef).remove();
+
             onValue(gameRef, (snapshot) => {
                 if (!snapshot.exists()) { alert("ホストがゲームを終了しました。"); window.location.reload(); return; }
+                
+                const oldState = gameState;
                 gameState = snapshot.val();
                 updateUI();
+
+                // ★CPU追加機能: ホストがCPUのターンを処理する
                 const localPlayer = gameState.players[localPlayerId];
-                if (localPlayer?.isHost && gameState.status === 'waiting' && Object.keys(gameState.players).length === 4) {
-                    startGame();
+                if(gameState.status === 'playing' && localPlayer?.isHost) {
+                    const playerIds = Object.keys(gameState.players);
+                    const currentPlayer = gameState.players[playerIds[gameState.currentPlayerIndex]];
+                    
+                    // ターンがCPUで、かつゲームの状態が更新された直後なら処理
+                    if(currentPlayer?.isCPU && JSON.stringify(oldState) !== JSON.stringify(gameState)) {
+                        setTimeout(cpuTurn, 1500); // 少し待ってからCPUの思考を開始
+                    }
                 }
             });
         }
         
-        function startGame() { /* ...前回のコードと同じ... */
+        function startGame(playerIds) {
             let deck = [];
             for (const suit of SUITS) for (const rank of RANKS) deck.push(new Card(suit, rank));
             deck.push(new Card(null, 'Joker'));
             for (let i = deck.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[deck[i], deck[j]] = [deck[j], deck[i]]; }
-            const playerIds = Object.keys(gameState.players);
+            
             const hands = deal(deck, playerIds.length);
             const updatedPlayers = {};
             let startPlayerIndex = 0;
-            playerIds.forEach((pid, index) => {
+
+            // playerIdsの順番をgameState.playersの順番に合わせる
+            const sortedPlayerIds = Object.keys(gameState.players);
+
+            sortedPlayerIds.forEach((pid, index) => {
                 const sortedHand = hands[index].sort((a,b) => a.value - b.value);
                 updatedPlayers[pid] = { ...gameState.players[pid], hand: sortedHand, hasPassed: false };
-                if (sortedHand.some(c => c.id === '♦-3')) { startPlayerIndex = index; }
+                if (sortedHand.some(c => c.id === '♦-3')) {
+                    startPlayerIndex = index;
+                }
             });
-            const newState = { ...gameState, players: updatedPlayers, status: 'playing', currentPlayerIndex: startPlayerIndex, table: { cards: [], isSequence: false }, passCount: 0, ranks: [], isRevolution: false };
+
+            const newState = { ...gameState, players: updatedPlayers, status: 'playing', currentPlayerIndex: startPlayerIndex, table: { cards: [], isSequence: false }, passCount: 0, ranks: [] };
             set(gameRef, newState);
         }
 
@@ -199,18 +229,27 @@
             return hands;
         }
 
-        function updateUI() { /* ...ほぼ同じ、革命状態の表示を追加... */
+        function updateUI() {
             if (!gameState || !localPlayerId || !gameState.players || !gameState.players[localPlayerId]) return;
+            
+            // ★CPU追加機能: ホストにゲーム開始ボタンを表示
+            const localPlayer = gameState.players[localPlayerId];
+            if (gameState.status === 'waiting' && localPlayer?.isHost) {
+                startGameArea.style.display = 'block';
+                // 2人以上いないと開始できない
+                startGameBtn.disabled = Object.keys(gameState.players).length < 2;
+            } else {
+                startGameArea.style.display = 'none';
+            }
+            // ... (以降のUI更新処理は前回とほぼ同じ) ...
             revolutionStatusElement.textContent = gameState.isRevolution ? 'はい' : 'いいえ';
             const playerIds = Object.keys(gameState.players);
-            const localPlayer = gameState.players[localPlayerId];
-            if (!localPlayer) return;
+            if (!playerIds.length) return;
             const currentPlayerId = playerIds[gameState.currentPlayerIndex];
             const currentPlayer = gameState.players[currentPlayerId];
             playerHandElement.innerHTML = '';
             (localPlayer.hand || []).sort((a,b) => getCardValue(a) - getCardValue(b)).forEach(cardData => {
-                const card = new Card(cardData.suit, cardData.rank);
-                const cardEl = createCardElement(card);
+                const cardEl = createCardElement(new Card(cardData.suit, cardData.rank));
                 cardEl.addEventListener('click', () => { if (currentPlayerId === localPlayerId) cardEl.classList.toggle('selected'); });
                 playerHandElement.appendChild(cardEl);
             });
@@ -219,7 +258,7 @@
                 const otherPlayer = gameState.players[pid];
                 const playerDiv = document.createElement('div');
                 playerDiv.className = 'cpu-player';
-                playerDiv.innerHTML = `<h3>${otherPlayer.name} (${(otherPlayer.hand || []).length}枚)</h3><div class="status">${otherPlayer.hasPassed ? 'パス' : (currentPlayerId === pid ? '考え中...' : '')}</div>`;
+                playerDiv.innerHTML = `<h3>${otherPlayer.name}</h3><p>${(otherPlayer.hand || []).length}枚</p><div class="status">${otherPlayer.hasPassed ? 'パス' : (currentPlayerId === pid ? '考え中...' : '')}</div>`;
                 otherPlayersArea.appendChild(playerDiv);
             });
             tableCardsElement.innerHTML = '';
@@ -238,169 +277,96 @@
             }
         }
         
-        function createCardElement(card) { /* ...前回のコードと同じ... */
-            const cardEl = document.createElement('div');
-            cardEl.className = 'card';
-            if (card.suit === '♥' || card.suit === '♦') cardEl.classList.add('red');
-            cardEl.dataset.cardId = card.id;
-            cardEl.innerHTML = `<span>${card.displayName}</span><span>${card.displayName}</span>`;
-            return cardEl;
-        }
+        // ... (createCardElement, getCardValue, isSequence, isValidPlay, playCardsAction, passButton, etc. は前回とほぼ同じ) ...
+        function createCardElement(card) { const cardEl = document.createElement('div'); cardEl.className = 'card'; if (card.suit === '♥' || card.suit === '♦') cardEl.classList.add('red'); cardEl.dataset.cardId = card.id; cardEl.innerHTML = `<span>${card.displayName}</span><span>${card.displayName}</span>`; return cardEl; }
+        function getCardValue(card) { if (card.rank === 'Joker') return RANK_VALUES.Joker; if (gameState.isRevolution) { return 17 - RANK_VALUES[card.rank]; } return RANK_VALUES[card.rank]; }
+        function isSequence(cards) { if (cards.length < 3) return false; const sortedCards = [...cards].sort((a,b) => a.value - b.value); const firstSuit = sortedCards[0].suit; if (!firstSuit) return false; for (let i = 0; i < sortedCards.length; i++) { if (sortedCards[i].suit !== firstSuit || sortedCards[i].value !== sortedCards[0].value + i) { return false; } } return true; }
+        function checkRoundEnd(state) { const activePlayersInRound = Object.values(state.players).filter(p => p.hand.length > 0 && !p.hasPassed); return activePlayersInRound.length <= 1; }
+        function resetRound(state) { state.message = state.message ? `${state.message} 場が流れました。` : '場が流れました。'; state.table = { cards: [], isSequence: false }; state.passCount = 0; Object.keys(state.players).forEach(pid => { if(state.players[pid].hand.length > 0) state.players[pid].hasPassed = false; }); return state; }
+        function advanceToNextPlayer(state) { const playerIds = Object.keys(state.players); let nextIndex = state.currentPlayerIndex; let loopCount = 0; do { nextIndex = (nextIndex + 1) % playerIds.length; loopCount++; } while ((state.players[playerIds[nextIndex]].hand.length === 0 || state.players[playerIds[nextIndex]].hasPassed) && loopCount < playerIds.length * 2); state.currentPlayerIndex = nextIndex; return state; }
+        function isValidPlay(playedCards) { if (playedCards.length === 0) return false; const table = gameState.table; const tableCards = table.cards || []; const playedIsSeq = isSequence(playedCards); if (tableCards.length === 0) return true; if (table.isSequence !== playedIsSeq) return false; if (!playedIsSeq && playedCards[0].rank !== 'Joker' && !playedCards.every(c => c.value === playedCards[0].value || c.rank === 'Joker')) return false; if (tableCards.length !== playedCards.length) return false; const tableValue = getCardValue(tableCards[tableCards.length - 1]); const playedValue = getCardValue(playedCards[playedCards.length - 1]); return playedValue > tableValue; }
+        playButton.addEventListener('click', () => { const selectedElements = playerHandElement.querySelectorAll('.card.selected'); if (selectedElements.length === 0) return alert('カードを選択してください。'); const localPlayerHand = gameState.players[localPlayerId].hand; const selectedCards = Array.from(selectedElements).map(el => { const cardData = localPlayerHand.find(c => c.id === el.dataset.cardId); return new Card(cardData.suit, cardData.rank); }).sort((a,b) => a.value - b.value); if (isValidPlay(selectedCards)) { playCardsAction(localPlayerId, selectedCards); } else { alert('そのカードは出せません。ルールを確認してください。'); } });
+        passButton.addEventListener('click', () => { let newState = JSON.parse(JSON.stringify(gameState)); newState.players[localPlayerId].hasPassed = true; newState.passCount++; if (checkRoundEnd(newState)) { newState = resetRound(newState); } else { newState = advanceToNextPlayer(newState); } newState.message = `${gameState.players[localPlayerId].name}がパスしました。`; set(gameRef, newState); });
 
-        // --- ★特殊ルール追加: ここからロジックの主要な変更点 ---
-
-        function getCardValue(card) {
-            if (card.rank === 'Joker') return RANK_VALUES.Joker;
-            // 革命中はカードの強さを反転させる (3が最強、2が最弱になる)
-            if (gameState.isRevolution) {
-                return 17 - RANK_VALUES[card.rank];
-            }
-            return RANK_VALUES[card.rank];
-        }
-
-        function isSequence(cards) {
-            if (cards.length < 3) return false;
-            const sortedCards = [...cards].sort((a,b) => a.value - b.value);
-            const firstSuit = sortedCards[0].suit;
-            if (!firstSuit) return false; // Jokerは階段に使えない
-            for (let i = 0; i < sortedCards.length; i++) {
-                if (sortedCards[i].suit !== firstSuit || sortedCards[i].value !== sortedCards[0].value + i) {
-                    return false;
-                }
-            }
-            return true;
-        }
-
-        function isValidPlay(playedCards) {
-            if (playedCards.length === 0) return false;
-            const table = gameState.table;
-            const tableCards = table.cards || [];
-            
-            const playedIsSeq = isSequence(playedCards);
-
-            // 場が空の場合
-            if (tableCards.length === 0) {
-                return true; // どんなカードでも出せる
-            }
-            
-            // 場と出すカードの種類（通常/階段）と枚数が一致する必要がある
-            if (table.isSequence !== playedIsSeq || tableCards.length !== playedCards.length) {
-                return false;
-            }
-
-            // 比較
-            const tableValue = getCardValue(tableCards[tableCards.length - 1]); // 階段でも通常でも一番強いカードで比較
-            const playedValue = getCardValue(playedCards[playedCards.length - 1]);
-            
-            return playedValue > tableValue;
-        }
-
-        function playCardsAction(playedCards) {
+        function playCardsAction(playerId, playedCards) {
             let newState = JSON.parse(JSON.stringify(gameState));
-            
-            // 手札から削除
-            newState.players[localPlayerId].hand = newState.players[localPlayerId].hand.filter(c => !playedCards.some(pc => pc.id === c.id));
-            
-            // ★特殊ルール: 革命チェック
-            const isSameRank = playedCards.every(c => c.value === playedCards[0].value);
-            if (isSameRank && playedCards.length >= 4) {
-                newState.isRevolution = !newState.isRevolution;
-                newState.message = `${newState.players[localPlayerId].name}が革命を起こしました！`;
-            } else {
-                newState.message = `${newState.players[localPlayerId].name}がカードを出しました。`;
-            }
-
+            newState.players[playerId].hand = newState.players[playerId].hand.filter(c => !playedCards.some(pc => pc.id === c.id));
+            const isSameRank = playedCards.every(c => c.value === playedCards[0].value || c.rank === 'Joker');
+            if (isSameRank && playedCards.length >= 4) { newState.isRevolution = !newState.isRevolution; newState.message = `${newState.players[playerId].name}が革命を起こしました！`; } else { newState.message = `${newState.players[playerId].name}がカードを出しました。`; }
             newState.table = { cards: playedCards, isSequence: isSequence(playedCards) };
             newState.passCount = 0;
-            Object.keys(newState.players).forEach(pid => { if (pid !== localPlayerId) newState.players[pid].hasPassed = false; });
-            
-            // ★特殊ルール: 8切りチェック
-            if (playedCards.some(c => c.rank === '8')) {
-                newState.message += ' (8切り！)';
-                newState = resetRound(newState);
-                // 8切りは自分のターンが継続するので、次のターンの処理を呼ばない
-                set(gameRef, newState);
-                return;
-            }
-            
-            // 上がり判定
-            if (newState.players[localPlayerId].hand.length === 0) {
-                newState.ranks.push(localPlayerId);
-                newState.message += ` 上がりました！`;
-                const activePlayers = Object.values(newState.players).filter(p => p.hand.length > 0);
-                if (activePlayers.length <= 1) {
-                    if (activePlayers.length === 1) newState.ranks.push(activePlayers[0].id);
-                    newState.status = 'finished';
-                    set(gameRef, newState);
-                    return;
-                }
-            }
-            
+            Object.keys(newState.players).forEach(pid => { if (pid !== playerId) newState.players[pid].hasPassed = false; });
+            if (playedCards.some(c => c.rank === '8')) { newState.message += ' (8切り！)'; newState = resetRound(newState); newState.currentPlayerIndex = Object.keys(newState.players).indexOf(playerId); set(gameRef, newState); return; }
+            if (newState.players[playerId].hand.length === 0) { newState.ranks.push(playerId); newState.message += ` 上がりました！`; const activePlayers = Object.values(newState.players).filter(p => p.hand.length > 0); if (activePlayers.length <= 1) { if (activePlayers.length === 1) newState.ranks.push(activePlayers[0].id); newState.status = 'finished'; set(gameRef, newState); return; } }
             newState = advanceToNextPlayer(newState);
             set(gameRef, newState);
         }
 
-        passButton.addEventListener('click', () => {
-            let newState = JSON.parse(JSON.stringify(gameState));
-            newState.players[localPlayerId].hasPassed = true;
-            newState.passCount++;
+        // ★CPU追加機能: CPUの思考ロジック
+        function cpuTurn() {
+            const playerIds = Object.keys(gameState.players);
+            const cpuPlayerId = playerIds[gameState.currentPlayerIndex];
+            const cpuPlayer = gameState.players[cpuPlayerId];
+            if (!cpuPlayer || !cpuPlayer.isCPU) return;
+
+            let bestPlay = [];
+            // 単純なロジック: 出せるカードのうち、一番弱いものを出す
+            const hand = cpuPlayer.hand.map(c => new Card(c.suit, c.rank));
+
+            // 出せる組み合わせを全て探す
+            const findValidPlays = () => {
+                const validPlays = [];
+                // 1. シングル、ペアなど
+                const groups = hand.reduce((acc, card) => {
+                    acc[card.value] = acc[card.value] || [];
+                    acc[card.value].push(card);
+                    return acc;
+                }, {});
+                for(const value in groups) {
+                    for(let i = 1; i <= groups[value].length; i++) {
+                        const combo = groups[value].slice(0, i);
+                        if(isValidPlay(combo)) validPlays.push(combo);
+                    }
+                }
+                // 2. 階段
+                const suitGroups = hand.reduce((acc, card) => {
+                    if(!card.suit) return acc;
+                    acc[card.suit] = acc[card.suit] || [];
+                    acc[card.suit].push(card);
+                    return acc;
+                }, {});
+                 for(const suit in suitGroups) {
+                    const sorted = suitGroups[suit].sort((a, b) => a.value - b.value);
+                    for (let i = 0; i < sorted.length - 2; i++) {
+                        for (let j = 3; i + j <= sorted.length; j++) {
+                            const combo = sorted.slice(i, i + j);
+                            if (isSequence(combo) && isValidPlay(combo)) {
+                                validPlays.push(combo);
+                            }
+                        }
+                    }
+                }
+                return validPlays;
+            };
             
-            if (checkRoundEnd(newState)) {
-                newState = resetRound(newState);
-                // パスで場が流れた場合、最後にカードを出した人から再開
-                // currentPlayerIndexはそのまま
+            const validPlays = findValidPlays();
+
+            if (validPlays.length > 0) {
+                // 最も弱い手を選択（先頭のカードの強さで比較）
+                validPlays.sort((a,b) => getCardValue(a[0]) - getCardValue(b[0]));
+                bestPlay = validPlays[0];
+                playCardsAction(cpuPlayerId, bestPlay);
             } else {
-                newState = advanceToNextPlayer(newState);
+                // パスする
+                let newState = JSON.parse(JSON.stringify(gameState));
+                newState.players[cpuPlayerId].hasPassed = true;
+                newState.passCount++;
+                if (checkRoundEnd(newState)) { newState = resetRound(newState); } 
+                else { newState = advanceToNextPlayer(newState); }
+                newState.message = `${cpuPlayer.name}がパスしました。`;
+                set(gameRef, newState);
             }
-            newState.message = `${gameState.players[localPlayerId].name}がパスしました。`;
-            set(gameRef, newState);
-        });
-
-        function checkRoundEnd(state) {
-            const activePlayersInRound = Object.values(state.players).filter(p => p.hand.length > 0 && !p.hasPassed);
-            return activePlayersInRound.length <= 1;
         }
-
-        function resetRound(state) {
-            state.message = state.message ? `${state.message} 場が流れました。` : '場が流れました。';
-            state.table = { cards: [], isSequence: false };
-            state.passCount = 0;
-            Object.keys(state.players).forEach(pid => {
-                if(state.players[pid].hand.length > 0) state.players[pid].hasPassed = false;
-            });
-            return state;
-        }
-
-        function advanceToNextPlayer(state) {
-            const playerIds = Object.keys(state.players);
-            let nextIndex = state.currentPlayerIndex;
-            let loopCount = 0;
-            do {
-                nextIndex = (nextIndex + 1) % playerIds.length;
-                loopCount++;
-            } while ((state.players[playerIds[nextIndex]].hand.length === 0 || state.players[playerIds[nextIndex]].hasPassed) && loopCount < playerIds.length * 2);
-            state.currentPlayerIndex = nextIndex;
-            return state;
-        }
-
-        // playButtonのイベントリスナーを修正
-        playButton.addEventListener('click', () => {
-            const selectedElements = playerHandElement.querySelectorAll('.card.selected');
-            if (selectedElements.length === 0) return alert('カードを選択してください。');
-            const localPlayerHand = gameState.players[localPlayerId].hand;
-            // 選択されたカードを手札オブジェクトから取得
-            const selectedCards = Array.from(selectedElements).map(el => {
-                const cardData = localPlayerHand.find(c => c.id === el.dataset.cardId);
-                return new Card(cardData.suit, cardData.rank); // 判定用にCardオブジェクトを再生成
-            }).sort((a,b) => a.value - b.value); // 階段判定のためにソート
-
-            if (isValidPlay(selectedCards)) {
-                playCardsAction(selectedCards);
-            } else {
-                alert('そのカードは出せません。ルールを確認してください。');
-            }
-        });
-
     </script>
 </body>
 </html>
