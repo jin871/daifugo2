@@ -16,12 +16,11 @@
         .card.selected { transform: translateY(-10px); box-shadow: 0 12px 20px -10px rgba(0,0,0,0.5); border: 2px solid #007bff; }
         .card.red { color: red; }
         .card span:last-child { align-self: flex-end; transform: rotate(180deg); }
-        #cpu-players { display: flex; justify-content: space-around; max-width: 800px; margin: 10px auto; }
+        #other-players-area { display: flex; justify-content: space-around; max-width: 800px; margin: 10px auto; }
         .cpu-player { background-color: #0c7c3f; border-radius: 10px; padding: 10px; width: 30%; }
         .cpu-player .status { font-style: italic; color: #ffc107; height: 20px; }
         #player-actions { margin-top: 15px; }
         #game-result { font-size: 1.5em; font-weight: bold; margin-top: 20px; }
-        #game-result button { font-size: 0.8em; padding: 10px 20px; margin-top: 15px; }
         #game-container { display: none; }
     </style>
 </head>
@@ -38,17 +37,16 @@
         </div>
         <hr>
         <div>
-            <input type="text" id="game-id-input" placeholder="ゲームIDを入力して参加">
+            <input type="text" id="game-id-input" placeholder="6桁のゲームIDを入力して参加">
             <button id="join-game-btn">ゲームに参加</button>
         </div>
-        <div id="game-id-display" style="margin-top: 10px;"></div>
     </div>
 
     <div id="game-container">
         <div id="game-info">
-            <p id="message">ゲームの準備中...</p>
+            <p id="message">参加者を待っています...</p>
             <p>現在のターン: <span id="current-player"></span></p>
-            <p>ゲームID: <span id="current-game-id"></span> (このIDを友達に教えてください)</p>
+            <p>ゲームID: <span id="current-game-id" style="font-weight: bold; font-size: 1.2em; color: #ffc107;"></span> (このIDを友達に教えてください)</p>
         </div>
 
         <div id="table">
@@ -75,9 +73,9 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
         import { getDatabase, ref, set, onValue, push, onDisconnect, serverTimestamp, get } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-database.js";
 
-        // ============== ここにあなたのFirebase設定を貼り付け ==============
+        // ============== あなたのFirebase設定 ==============
         const firebaseConfig = {
-            apiKey: "AIzaSyA0D7fOnIvQFU3O29q6bb_6gj5tWN23N0s", // APIキーが外部に漏れるリスクがあります
+            apiKey: "AIzaSyA0D7fOnIvQFU3O29q6bb_6gj5tWN23N0s",
             authDomain: "memory-game-10e98.firebaseapp.com",
             databaseURL: "https://memory-game-10e98-default-rtdb.firebaseio.com",
             projectId: "memory-game-10e98",
@@ -86,29 +84,21 @@
             appId: "1:435852264433:web:0ef957830b634b9eb13a50",
             measurementId: "G-8GN7P9PFX7"
         };
-        // =============================================================
+        // ===============================================
 
-        // Firebaseの初期化
         const app = initializeApp(firebaseConfig);
         const database = getDatabase(app);
 
-        // 定数
+        // ... (定数、DOM要素、カードクラスの定義は前回と同じなので省略)
         const SUITS = ['♠', '♥', '♦', '♣'];
         const RANKS = ['3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A', '2'];
-        const RANK_VALUES = {
-            '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10,
-            'J': 11, 'Q': 12, 'K': 13, 'A': 14, '2': 15, 'Joker': 99
-        };
-
-        // DOM要素
+        const RANK_VALUES = { '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13, 'A': 14, '2': 15, 'Joker': 99 };
         const gameSetupDiv = document.getElementById('game-setup');
         const gameContainerDiv = document.getElementById('game-container');
         const playerNameInput = document.getElementById('player-name-input');
         const createGameBtn = document.getElementById('create-game-btn');
         const joinGameBtn = document.getElementById('join-game-btn');
         const gameIdInput = document.getElementById('game-id-input');
-        const gameIdDisplay = document.getElementById('game-id-display');
-        
         const playerHandElement = document.getElementById('player-hand');
         const tableCardsElement = document.getElementById('table-cards');
         const messageElement = document.getElementById('message');
@@ -118,49 +108,48 @@
         const playButton = document.getElementById('play-button');
         const passButton = document.getElementById('pass-button');
         const gameResultElement = document.getElementById('game-result');
-
-        // ゲーム状態変数
         let currentGameId = null;
         let localPlayerId = null;
         let gameRef = null;
         let gameState = {};
+        class Card { constructor(suit, rank) { this.suit = suit; this.rank = rank; this.value = RANK_VALUES[rank]; this.id = suit ? `${suit}-${rank}` : 'Joker'; } get displayName() { return this.suit ? `${this.suit}${this.rank}` : 'Joker'; } }
 
-        // カードクラス
-        class Card {
-            constructor(suit, rank) {
-                this.suit = suit;
-                this.rank = rank;
-                this.value = RANK_VALUES[rank];
-                this.id = suit ? `${suit}-${rank}` : 'Joker';
-            }
-            get displayName() { return this.suit ? `${this.suit}${this.rank}` : 'Joker'; }
+        // --- ★ここからが変更点★ ---
+
+        /**
+         * 6桁のランダムな数字のルームIDを生成する関数
+         */
+        function generateRoomId() {
+            return Math.floor(100000 + Math.random() * 900000).toString();
         }
 
-        // --- ゲーム設定 ---
         createGameBtn.addEventListener('click', async () => {
             const playerName = playerNameInput.value.trim();
-            if (!playerName) {
-                alert('名前を入力してください。');
-                return;
-            }
+            if (!playerName) { alert('名前を入力してください。'); return; }
 
             localPlayerId = `player_${Date.now()}`;
-            const newGameRef = push(ref(database, 'games'));
-            currentGameId = newGameRef.key;
+            
+            // 重複しないユニークな6桁のIDが見つかるまでループ
+            let newGameId;
+            let gameExists = true;
+            while (gameExists) {
+                newGameId = generateRoomId();
+                const gameRefToCheck = ref(database, `games/${newGameId}`);
+                const snapshot = await get(gameRefToCheck);
+                if (!snapshot.exists()) {
+                    gameExists = false; // 空のIDが見つかった
+                }
+            }
+            
+            currentGameId = newGameId;
             gameRef = ref(database, `games/${currentGameId}`);
             
             const initialGameState = {
                 gameId: currentGameId,
                 players: {
-                    [localPlayerId]: {
-                        id: localPlayerId,
-                        name: playerName,
-                        hand: [],
-                        hasPassed: false,
-                        isHost: true
-                    }
+                    [localPlayerId]: { id: localPlayerId, name: playerName, hand: [], hasPassed: false, isHost: true }
                 },
-                status: 'waiting', // waiting, playing, finished
+                status: 'waiting',
                 currentPlayerIndex: 0,
                 tableCards: [],
                 passCount: 0,
@@ -172,35 +161,27 @@
             setupGameListener();
         });
 
+        // --- ★変更点はここまで★ ---
+
+
         joinGameBtn.addEventListener('click', async () => {
             const playerName = playerNameInput.value.trim();
             const gameId = gameIdInput.value.trim();
-            if (!playerName || !gameId) {
-                alert('名前とゲームIDを入力してください。');
-                return;
-            }
+            if (!playerName || !gameId) { alert('名前とゲームIDを入力してください。'); return; }
 
             const existingGameRef = ref(database, `games/${gameId}`);
             const snapshot = await get(existingGameRef);
 
             if (snapshot.exists()) {
                 const gameData = snapshot.val();
-                if (Object.keys(gameData.players || {}).length >= 4) {
-                    alert('このゲームは満員です。');
-                    return;
-                }
+                if (Object.keys(gameData.players || {}).length >= 4) { alert('このゲームは満員です。'); return; }
                 
                 currentGameId = gameId;
                 gameRef = existingGameRef;
                 localPlayerId = `player_${Date.now()}`;
 
                 const playerRef = ref(database, `games/${currentGameId}/players/${localPlayerId}`);
-                await set(playerRef, {
-                    id: localPlayerId,
-                    name: playerName,
-                    hand: [],
-                    hasPassed: false
-                });
+                await set(playerRef, { id: localPlayerId, name: playerName, hand: [], hasPassed: false });
 
                 setupGameListener();
             } else {
@@ -213,7 +194,6 @@
             gameContainerDiv.style.display = 'block';
             currentGameIdElement.textContent = currentGameId;
             
-            // 接続が切れたらプレイヤーを削除する
             const playerRef = ref(database, `games/${currentGameId}/players/${localPlayerId}`);
             onDisconnect(playerRef).remove();
 
@@ -226,28 +206,22 @@
                 gameState = snapshot.val();
                 updateUI();
 
-                // ホストがゲームを開始する
                 const localPlayer = gameState.players[localPlayerId];
-                if (localPlayer?.isHost && gameState.status === 'waiting' && Object.keys(gameState.players).length >= 2) {
-                     // 2人以上集まったら自動で開始 (ここでは仮に2人)
-                     const playerIds = Object.keys(gameState.players);
-                     if (playerIds.length === 4) { // 4人で開始
-                        startGame();
-                     }
+                if (localPlayer?.isHost && gameState.status === 'waiting' && Object.keys(gameState.players).length === 4) {
+                    startGame();
                 }
             });
         }
         
-        // --- ゲームロジック ---
         function startGame() {
             let deck = [];
             for (const suit of SUITS) for (const rank of RANKS) deck.push(new Card(suit, rank));
             deck.push(new Card(null, 'Joker'));
-            for (let i = deck.length - 1; i > 0; i--) [deck[i], deck[j]] = [deck[j], deck[i]];
+            for (let i = deck.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [deck[i], deck[j]] = [deck[j], deck[i]]; }
 
-            const hands = deal(deck, Object.keys(gameState.players).length);
-            
             const playerIds = Object.keys(gameState.players);
+            const hands = deal(deck, playerIds.length);
+            
             const updatedPlayers = {};
             let startPlayerIndex = 0;
             playerIds.forEach((pid, index) => {
@@ -278,56 +252,48 @@
         }
 
         function updateUI() {
-            if (!gameState || !localPlayerId || !gameState.players[localPlayerId]) return;
+            if (!gameState || !localPlayerId || !gameState.players || !gameState.players[localPlayerId]) return;
 
             const playerIds = Object.keys(gameState.players);
             const localPlayer = gameState.players[localPlayerId];
+            if (!localPlayer) return; // 自分がまだゲームに参加していない場合は何もしない
+
             const currentPlayerId = playerIds[gameState.currentPlayerIndex];
             const currentPlayer = gameState.players[currentPlayerId];
 
-            // 自分の手札
             playerHandElement.innerHTML = '';
-            localPlayer.hand.forEach(cardData => {
+            (localPlayer.hand || []).forEach(cardData => {
                 const card = new Card(cardData.suit, cardData.rank);
                 const cardEl = createCardElement(card);
-                cardEl.addEventListener('click', () => {
-                    if (currentPlayerId === localPlayerId) cardEl.classList.toggle('selected');
-                });
+                cardEl.addEventListener('click', () => { if (currentPlayerId === localPlayerId) cardEl.classList.toggle('selected'); });
                 playerHandElement.appendChild(cardEl);
             });
             
-            // 他のプレイヤー
             otherPlayersArea.innerHTML = '';
             playerIds.filter(pid => pid !== localPlayerId).forEach(pid => {
                 const otherPlayer = gameState.players[pid];
                 const playerDiv = document.createElement('div');
-                playerDiv.className = 'cpu-player'; // CSSを再利用
-                playerDiv.innerHTML = `<h3>${otherPlayer.name} (${otherPlayer.hand.length}枚)</h3><div class="status">${otherPlayer.hasPassed ? 'パス' : (currentPlayerId === pid ? '考え中...' : '')}</div>`;
+                playerDiv.className = 'cpu-player';
+                playerDiv.innerHTML = `<h3>${otherPlayer.name} (${(otherPlayer.hand || []).length}枚)</h3><div class="status">${otherPlayer.hasPassed ? 'パス' : (currentPlayerId === pid ? '考え中...' : '')}</div>`;
                 otherPlayersArea.appendChild(playerDiv);
             });
 
-            // 場
             tableCardsElement.innerHTML = '';
-            (gameState.tableCards || []).forEach(cardData => {
-                tableCardsElement.appendChild(createCardElement(new Card(cardData.suit, cardData.rank)));
-            });
+            (gameState.tableCards || []).forEach(cardData => { tableCardsElement.appendChild(createCardElement(new Card(cardData.suit, cardData.rank))); });
 
-            // 情報
-            currentPlayerElement.textContent = currentPlayer.name;
-            messageElement.textContent = gameState.message || `現在の手番: ${currentPlayer.name}`;
+            currentPlayerElement.textContent = currentPlayer ? currentPlayer.name : '';
+            messageElement.textContent = gameState.message || `現在の手番: ${currentPlayer ? currentPlayer.name : ''}`;
             
-            // ボタンの有効/無効
             playButton.disabled = gameState.status !== 'playing' || currentPlayerId !== localPlayerId;
             passButton.disabled = gameState.status !== 'playing' || currentPlayerId !== localPlayerId;
             
-            // ゲーム結果
             if (gameState.status === 'finished') {
                 let resultText = "<h2>ゲーム終了！</h2><ol>";
-                gameState.ranks.forEach((pid, index) => {
-                    resultText += `<li>${index + 1}位: ${gameState.players[pid].name}</li>`;
-                });
+                gameState.ranks.forEach((pid, index) => { resultText += `<li>${index + 1}位: ${gameState.players[pid].name}</li>`; });
                 resultText += "</ol>";
                 gameResultElement.innerHTML = resultText;
+            } else if (gameState.status === 'waiting') {
+                messageElement.textContent = `参加者を待っています... (${playerIds.length} / 4人)`;
             }
         }
         
@@ -345,9 +311,7 @@
             if (selectedElements.length === 0) return alert('カードを選択してください。');
             
             const localPlayerHand = gameState.players[localPlayerId].hand;
-            const selectedCards = Array.from(selectedElements).map(el => {
-                return localPlayerHand.find(c => c.id === el.dataset.cardId);
-            });
+            const selectedCards = Array.from(selectedElements).map(el => localPlayerHand.find(c => c.id === el.dataset.cardId));
 
             if (isValidPlay(selectedCards)) {
                 playCardsAction(selectedCards);
@@ -357,36 +321,29 @@
         });
 
         passButton.addEventListener('click', () => {
-            let newState = { ...gameState };
+            let newState = JSON.parse(JSON.stringify(gameState));
             newState.players[localPlayerId].hasPassed = true;
             newState.passCount++;
             
             if (checkRoundEnd(newState)) {
                 newState = resetRound(newState);
-            } else {
-                newState = advanceToNextPlayer(newState);
             }
+            newState = advanceToNextPlayer(newState);
             newState.message = `${gameState.players[localPlayerId].name}がパスしました。`;
             set(gameRef, newState);
         });
         
         function playCardsAction(playedCards) {
-            let newState = { ...gameState };
-            // 手札から削除
+            let newState = JSON.parse(JSON.stringify(gameState));
             newState.players[localPlayerId].hand = newState.players[localPlayerId].hand.filter(c => !playedCards.some(pc => pc.id === c.id));
             newState.tableCards = playedCards;
             newState.passCount = 0;
-            // 他のプレイヤーのパス状態をリセット
-            Object.keys(newState.players).forEach(pid => {
-                if (pid !== localPlayerId) newState.players[pid].hasPassed = false;
-            });
+            Object.keys(newState.players).forEach(pid => { if (pid !== localPlayerId) newState.players[pid].hasPassed = false; });
             newState.message = `${newState.players[localPlayerId].name}がカードを出しました。`;
             
-            // 上がり判定
             if (newState.players[localPlayerId].hand.length === 0) {
                 newState.ranks.push(localPlayerId);
                 newState.message += ` 上がりました！`;
-                // ゲーム終了判定
                 const activePlayers = Object.values(newState.players).filter(p => p.hand.length > 0);
                 if (activePlayers.length <= 1) {
                     if (activePlayers.length === 1) newState.ranks.push(activePlayers[0].id);
@@ -404,7 +361,7 @@
             if (cards.length === 0) return false;
             const firstValue = cards.find(c => c.rank !== 'Joker')?.value;
             if (!cards.every(c => c.rank === 'Joker' || c.value === firstValue)) return false;
-            if (gameState.tableCards.length > 0) {
+            if (gameState.tableCards && gameState.tableCards.length > 0) {
                 if (cards.length !== gameState.tableCards.length) return false;
                 const tableValue = Math.max(...gameState.tableCards.map(c => RANK_VALUES[c.rank]));
                 const playValue = Math.max(...cards.map(c => c.value));
@@ -423,21 +380,29 @@
             state.tableCards = [];
             state.passCount = 0;
             Object.keys(state.players).forEach(pid => state.players[pid].hasPassed = false);
-            // ターンは最後にカードを出した人から継続（パスで流れた場合は次の人へ）
-            // この実装では簡略化し、次のアクティブプレイヤーに回す
-            return state; // advanceToNextPlayerが次のターンを決定する
+            return state;
         }
 
         function advanceToNextPlayer(state) {
             const playerIds = Object.keys(state.players);
             let nextIndex = state.currentPlayerIndex;
+            let loopCount = 0; 
             do {
                 nextIndex = (nextIndex + 1) % playerIds.length;
-            } while (state.players[playerIds[nextIndex]].hand.length === 0 || state.players[playerIds[nextIndex]].hasPassed);
+                loopCount++;
+            } while (
+                (state.players[playerIds[nextIndex]].hand.length === 0 || state.players[playerIds[nextIndex]].hasPassed) &&
+                loopCount < playerIds.length * 2
+            );
+
             state.currentPlayerIndex = nextIndex;
+            
+            if(checkRoundEnd(state) && state.tableCards.length > 0){
+                state = resetRound(state);
+            }
+
             return state;
         }
-
     </script>
 </body>
 </html>
